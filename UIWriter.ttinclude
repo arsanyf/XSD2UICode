@@ -1,0 +1,93 @@
+﻿
+<#+
+
+public interface IUIWriter
+{
+string GenerateText();
+
+string GetUIType();
+}
+
+public class TextBoxUIWriter : IUIWriter
+{
+	public string Name {get; set;}
+	public int GridColumn {get; set;}
+	public string Documentation {get; set;}
+
+	public string GenerateText()
+	{
+	StringBuilder res = new StringBuilder();
+	res.Append(string.Format("<TextBox x:Name=\"tb_{0}\" Text=\"\"", Name));
+	if(GridColumn > 0)
+		res.Append(" Grid.Column=\"1\"");
+	if(!string.IsNullOrEmpty(Documentation))
+		res.Append(string.Format(" Tooltip=\"{0}\"", Documentation));
+	res.Append("/>");
+	return res.ToString();
+	}
+
+	public string GetUIType()
+	{
+		return "TextBox";
+	}
+}
+
+public struct ComboBoxOption
+{
+	public string Name;
+	public string Documentation;
+}
+
+public class ComboBoxUIWriter : IUIWriter
+{
+	public string Name {get; set;}
+	public int GridColumn {get; set;}
+	public string Documentation {get; set;}
+	public List<ComboBoxOption> Options {get; set;}
+
+	public string GenerateText()
+	{
+	StringBuilder res = new StringBuilder();
+	res.Append(string.Format("<ComboBox x:Name=\"tb_{0}\" Text=\"\"", Name));
+	if(GridColumn > 0)
+		res.Append(" Grid.Column=\"1\"");
+	if(!string.IsNullOrEmpty(Documentation))
+		res.Append(string.Format(" Tooltip=\"{0}\"", Documentation));
+
+	res.Append(">");
+	foreach(var option in Options)
+	{
+	res.Append(string.Format("<ComboBoxItem Content=\"{0}\" ToolTip=\"{1}\"/>\n", option.Name, option.Documentation ));
+	}
+	res.Append("</ComboBox>");
+
+	return res.ToString();
+	}
+
+	public string GetUIType()
+	{
+		return "ComboBox";
+	}
+}
+
+public class RowUIWriter : IUIWriter
+{
+	public string Name {get; set;}
+	public string Content {get; set;}
+	public int GridColumn {get; set;}
+	public IUIWriter InnerUIControl {get; set;}
+
+	public string GenerateText()
+	{
+	StringBuilder res = new StringBuilder();
+	res.Append(string.Format("<Grid Grid.Column=\"1\" x:Name=\"g_{0}\" MinHeight=\"30\">\n<Grid.ColumnDefinitions>\n<ColumnDefinition Width=\"150\" />\n<ColumnDefinition Width=\"*\" />\n</Grid.ColumnDefinitions>\n<Label x:Name=\"lbl_{0}\" Content=\"{1}\" Grid.Column=\"0\" />\n{2}\n</Grid>", Name, Content, InnerUIControl.GenerateText()));
+	return res.ToString();
+	}
+
+	public string GetUIType()
+	{
+		return "RowUI";
+	}
+}
+
+#>

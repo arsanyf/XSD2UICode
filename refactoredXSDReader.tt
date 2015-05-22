@@ -1,0 +1,351 @@
+﻿<#@ template debug="false" hostspecific="false" language="C#" #>
+<#@ assembly name="System.Core" #>
+<#@ assembly name="System.Xml" #>
+<#@ import namespace="System.Linq" #>
+<#@ import namespace="System.Xml" #>
+<#@ import namespace="System.Text" #>
+<#@ import namespace="System.Collections.Generic" #>
+<#@ import namespace="System.IO" #>
+<#@ include file="EF.Utility.CS.ttinclude" #>
+<#@ include file="$(ProjectDir)/Custom Tools/UIWriter.ttinclude" #>
+
+<#@ output extension=".txt" #>
+
+<#
+XmlDocument xdoc, ;
+
+xdoc = new XmlDocument();
+xdoc.Load(@"<xsd>");
+
+List<string> lUserControls = new List<string>();
+List<string> lControlToProperty = new List<string>();
+
+XmlNamespaceManager xmlnsman = new XmlNamespaceManager(isodoc.NameTable);
+// add namespaces
+
+
+foreach(XmlNode node in xdoc.SelectNodes("./xsd:schema", xmlnsman)[0])
+{
+string printout = string.Empty;
+switch(node.Name)
+{
+case "xsd:import":
+//WriteNewFile(GetAttributeValue(node, "schemaLocation").Split('_')[0]);
+break;
+case "xsd:simpleType":
+lUserControls.Add(Chunkizer.SimpleTypeToCS(node, xmlnsman));
+break;
+case "xsd:complexType":
+lUserControls.Add(Chunkizer.ComplexTypeToCS(node, xmlnsman));
+break;
+case "xsd:element":
+Chunkizer.ElementToCS(node, xmlnsman);
+break;
+
+}
+}
+// print out controls list
+foreach(string str in lUserControls)
+{
+#>
+<#= str #>
+<#
+}
+#>
+<#
+// print out control to property list
+foreach(string str in lControlToProperty)
+{
+#>
+<#= str #>
+<#
+}
+#>
+
+
+<#+
+public static class Chunkizer
+{
+static Dictionary<string, string> comboboxes = new Dictionary<string, string>();
+static Dictionary<string, string> typeRegistrar = new Dictionary<string, string>();
+
+static Dictionary<string, IUIWriter> comboboxes_typed = new Dictionary<string, IUIWriter>();
+static Dictionary<string, IUIWriter> typeRegistrar_typed = new Dictionary<string, IUIWriter>();
+
+public static string  SimpleTypeToCS(XmlNode node, XmlNamespaceManager xmlnsman)
+{
+StringBuilder res = new StringBuilder();
+
+
+string attr_name = GetAttributeValue(node, "name");
+string documentation = string.Empty;
+string basevalue = string.Empty;
+
+documentation = GetDocumentationText(node, xmlnsman);
+
+
+if(attr_name.EndsWith("_EnumType") || node.SelectNodes(".//xsd:enumeration", xmlnsman).Count > 0)
+{
+
+ComboBoxUIWriter o_ComboBoxWriter = new ComboBoxUIWriter();
+o_ComboBoxWriter.Options = new List<ComboBoxOption>();
+
+
+
+foreach(XmlNode enumNode in node.SelectNodes(".//xsd:enumeration", xmlnsman))
+{
+string tempValue = GetAttributeValue(enumNode, "value");
+string tempToolTip = GetDocumentationText(enumNode, xmlnsman);
+
+ComboBoxOption o_ComboBoxOption = new ComboBoxOption();
+o_ComboBoxOption.Name = tempValue;
+o_ComboBoxOption.Documentation = tempToolTip;
+o_ComboBoxWriter.Options.Add(o_ComboBoxOption);
+}
+
+res.Append(o_ComboBoxWriter.GenerateText());
+comboboxes[attr_name] = res.ToString();
+res.Clear();
+}
+else if(attr_name.EndsWith("_Type"))
+{
+if(node.SelectNodes(".//xsd:restriction", xmlnsman).Count == 1)
+{
+RowUIWriter o_RowUIWriter = new RowUIWriter();
+o_RowUIWriter.Name = attr_name;
+o_RowUIWriter.GridColumn = 1;
+
+TextBoxUIWriter temp_TextBoxUIWriter = new TextBoxUIWriter();
+temp_TextBoxUIWriter.Name = attr_name;
+
+o_RowUIWriter.InnerUIControl = temp_TextBoxUIWriter;
+res.Append(o_RowUIWriter.GenerateText());
+
+}
+typeRegistrar[attr_name] = res.ToString();
+
+}
+
+
+
+return res.ToString();
+}
+
+public static string ComplexTypeToCS(XmlNode node, XmlNamespaceManager xmlnsman, string parentName = "")
+{
+StringBuilder res = new StringBuilder();
+string attr_name = GetAttributeValue(node, "name");
+string documentation = GetDocumentationText(node, xmlnsman);
+
+if(node.SelectNodes("./xsd:sequence/xsd:element", xmlnsman).Count > 1)
+{
+res.Append("<StackPanel Grid.Column=\"1\">");
+}
+
+foreach(XmlNode element in node.SelectNodes("./xsd:sequence/xsd:element", xmlnsman))
+{
+
+string tempInnerComplexType = string.Empty;
+string tempExtensionType = string.Empty;
+string tempName = GetAttributeValue(element, "name");
+string tempDocumentation = GetDocumentationText(element, xmlnsman);
+
+if(element.SelectNodes("./xsd:complexType", xmlnsman).Count > 0)
+{
+tempInnerComplexType = ComplexTypeToCS(element.SelectNodes("./xsd:complexType", xmlnsman)[0], xmlnsman, parentName + attr_name + '_' + tempName + '_');
+}
+if(element.SelectNodes("./xsd:extension", xmlnsman).Count > 0)
+{
+string tempBaseType = GetAttributeValue(element.SelectNodes("./xsd:extension", xmlnsman)[0], "base");
+tempExtensionType = GetRegisteredType(string.Format("{0}{1}_{2}_{3}", parentName, attr_name, tempName, tempBaseType), XSDToCSTypeConverter(tempBaseType));
+}
+
+string tempType = XSDToCSTypeConverter(GetAttributeValue(element, "type"));
+
+RowUIWriter o_RowUIWriter = new RowUIWriter();
+o_RowUIWriter.Name = parentName + attr_name + '_' + tempName;
+o_RowUIWriter.Content = tempName;
+o_RowUIWriter.GridColumn = 1;
+
+//
+UIWriter temp_TextBoxUIWriter = GetRegisteredType(tempType);
+temp_TextBoxUIWriter.Name = parentName + attr_name + '_' + tempName;
+o_RowUIWriter.InnerUIControl = temp_TextBoxUIWriter;
+res.Append(o_RowUIWriter.GenerateText());
+
+
+string tempPrefix = string.Format("{0}{1}_{2}", parentName, attr_name, tempName);
+
+if(!string.IsNullOrEmpty(tempInnerComplexType) || !string.IsNullOrEmpty(tempExtensionType))
+{
+res.Append("<StackPanel Grid.Column=\"1\">");
+res.Append(tempExtensionType);
+res.Append(tempInnerComplexType);
+res.Append("</StackPanel>");
+}
+else if(comboboxes.ContainsKey(tempType))
+{
+
+	res.Append(GetComboBoxText(parentName + attr_name + '_' + tempName, tempType).Replace("<ComboBox ", "<ComboBox Grid.Column=\"1\" "));
+}
+else if(typeRegistrar.ContainsKey(tempType))
+{
+res.Append(GetRegisteredType(parentName + attr_name + '_' + tempName, tempType));
+}
+else if(tempType == "date")
+{
+res.Append(string.Format("<DatePicker x:Name=\"dt_{0}{1}_{2}\" ToolTip=\"{3}\" Grid.Column=\"1\" />\n", parentName, attr_name, tempName, tempDocumentation));
+}
+else
+{
+res.Append(string.Format("<TextBox x:Name=\"tb_{0}{1}_{2}\" Text=\"\" ToolTip=\"{3}\" Grid.Column=\"1\" />\n", parentName, attr_name, tempName, tempDocumentation));
+}
+res.Append("\n</Grid>\n");
+
+}
+//TODO .. empty content and mixed content
+foreach(XmlNode element in node.SelectNodes("./xsd:simpleContent", xmlnsman))
+{
+//unique name?
+res.Append("<Grid Grid.Column=\"1\" MinHeight=\"30\">\n<Grid.ColumnDefinitions >\n<ColumnDefinition Width=\"150\" />\n<ColumnDefinition Width=\"*\" />\n</Grid.ColumnDefinitions>\n<Label Grid.Column=\"0\" />\n");
+
+if(element.SelectNodes("./xsd:extension", xmlnsman).Count > 0)
+{
+XmlNode tempElement = element.SelectNodes("./xsd:extension", xmlnsman)[0];
+res.Append("<StackPanel Grid.Column=\"1\">");
+foreach(XmlNode attributeElement in tempElement.SelectNodes("./xsd:attribute", xmlnsman))
+{
+string tempName = GetAttributeValue(attributeElement, "name");
+string tempType = XSDToCSTypeConverter(GetAttributeValue(attributeElement, "type"));
+string attributeDocumentation = GetDocumentationText(attributeElement, xmlnsman);
+
+res.Append(string.Format("<Grid Grid.Column=\"1\" x:Name=\"g_{0}{1}_{2}\" MinHeight=\"30\">\n<Grid.ColumnDefinitions >\n<ColumnDefinition Width=\"150\" />\n<ColumnDefinition Width=\"*\" />\n</Grid.ColumnDefinitions>\n<Label x:Name=\"lbl_{0}{1}_{2}\" Content=\"{2}\" Grid.Column=\"0\" />\n", parentName, attr_name, tempName));
+
+if(comboboxes.ContainsKey(tempType))
+{
+	res.Append(GetComboBoxText(parentName + attr_name + '_' + tempName, tempType).Replace("<ComboBox ", "<ComboBox Grid.Column=\"1\" "));
+}
+else if(typeRegistrar.ContainsKey(tempType))
+{
+res.Append(GetRegisteredType(parentName + attr_name + '_' + tempName, tempType));
+}
+else if(tempType == "date" && !string.IsNullOrEmpty(parentName))
+{
+res.Append(string.Format("<DatePicker x:Name=\"dt_{0}{1}_{2}\" ToolTip=\"{3}\" Grid.Column=\"1\" />\n", parentName, attr_name, tempName, attributeDocumentation));
+}
+else
+{
+res.Append(string.Format("<TextBox x:Name=\"tb_{0}{1}_{2}\" Text=\"\" ToolTip=\"{3}\" Grid.Column=\"1\" />\n", parentName, attr_name, tempName, attributeDocumentation));
+}
+res.Append("\n</Grid>\n");
+}
+res.Append(string.Format("<Grid Grid.Column=\"1\" x:Name=\"g_{0}{1}_value\" MinHeight=\"30\">\n<Grid.ColumnDefinitions >\n<ColumnDefinition Width=\"150\" />\n<ColumnDefinition Width=\"*\" />\n</Grid.ColumnDefinitions>\n<Label x:Name=\"lbl_{0}{1}_value\" Content=\"Value\" Grid.Column=\"0\" />\n", parentName, attr_name));
+res.Append(string.Format("<TextBox x:Name=\"tb_{0}{1}_value\" Text=\"\" Grid.Column=\"1\" />\n", parentName, attr_name));
+res.Append("\n</Grid>\n");
+res.Append("</StackPanel>\n");
+
+}
+else if (element.SelectNodes("./xsd:restriction", xmlnsman).Count > 0)
+{
+XmlNode tempElement = element.SelectNodes("./xsd:restriction", xmlnsman)[0];
+}
+
+res.Append("\n</Grid>\n");
+
+}
+
+if(node.SelectNodes("./xsd:sequence/xsd:element", xmlnsman).Count > 1)
+{
+res.Append("</StackPanel>");
+}
+
+
+if(attr_name.Contains("_Type"))
+{
+typeRegistrar[attr_name] = res.ToString();
+}
+
+return res.ToString();
+}
+
+public static string  ElementToCS(XmlNode node, XmlNamespaceManager xmlnsman)
+{
+StringBuilder res = new StringBuilder();
+
+string attr_name = GetAttributeValue(node, "name");
+string objectType = "class";
+string documentation = string.Empty;
+StringBuilder sbContent = new StringBuilder();
+
+documentation = GetDocumentationText(node, xmlnsman);
+
+foreach(XmlNode element in node.SelectNodes("./xsd:complexType/xsd:sequence/xsd:element", xmlnsman))
+{
+string tempType = XSDToCSTypeConverter(GetAttributeValue(element, "type"));
+string tempName = GetAttributeValue(element, "name");
+sbContent.Append(string.Format("public {0} {1} {{ get; set; }}\n", tempType, tempName));
+}
+foreach(XmlNode element in node.SelectNodes("./xsd:complexType/xsd:attribute", xmlnsman))
+{
+string tempType = XSDToCSTypeConverter(GetAttributeValue(element, "type"));
+string tempName = GetAttributeValue(element, "name");
+sbContent.Append(string.Format("//attribute\npublic {0} {1} {{ get; set; }}\n", tempType, tempName));
+}
+
+
+res.Append(string.Format("{0}\n{1} {2}\n{{\n{3}\n}}", documentation, objectType, attr_name, sbContent.ToString()));
+
+
+return res.ToString();
+}
+
+public static string GetComboBoxText(string cmbName, string type)
+{
+string res = comboboxes[type];
+
+return res.Replace("<ComboBox ", string.Format("<ComboBox x:Name=\"cmb_{0}\" ", cmbName));
+
+}
+
+static string GetRegisteredType(string xname, string type)
+{
+string res;
+UIWriter tempUIWriter = typeRegistrar_typed[type];
+tempUIWriter.Name = xname;
+return res.GenerateText();
+}
+
+static UIWriter GetRegisteredType(string type)
+{
+UIWriter tempUIWriter = typeRegistrar_typed[type];
+return tempUIWriter;
+}
+
+
+static string GetDocumentationText(XmlNode node, XmlNamespaceManager xmlnsman)
+{
+string documentationtext = string.Empty;
+if(node.SelectNodes("./xsd:annotation/xsd:documentation", xmlnsman).Count == 1)
+	documentationtext = node.SelectNodes("./xsd:annotation/xsd:documentation", xmlnsman)[0].InnerXml.Trim().Replace("\n", " ").Replace("\"", "'");
+return documentationtext;
+}
+
+static string GetAttributeValue(XmlNode node, string attrname)
+{
+return node.Attributes[attrname] != null ? node.Attributes[attrname].Value : string.Empty;
+}
+
+static string XSDToCSTypeConverter(string xsdtype)
+{
+if(string.IsNullOrEmpty(xsdtype))
+	return string.Empty;
+string[] splitted = xsdtype.Split(':');
+if(splitted.Length == 1)
+	return splitted[0];
+else
+	return splitted[1];
+}
+
+}
+
+#>
